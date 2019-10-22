@@ -676,23 +676,23 @@ status:
 
 But those annotations [won't work for the Prometheus Operator](https://github.com/helm/charts/tree/master/stable/prometheus-operator#prometheusioscrape). If you're deploying on OpenShift 4.x, chances are that you're using the Prometheus Operator. 
 
-In a scenario where the Prometheus is deployed and managed by the Prometheus Operator, you should create a new [`ServiceMonitor`](https://github.com/coreos/prometheus-operator/blob/master/example/prometheus-operator-crd/servicemonitor.crd.yaml) resource to expose the Kogito Service to Prometheus to scrape:
+In a scenario where the Prometheus is deployed and managed by the Prometheus Operator, a new [`ServiceMonitor`](https://github.com/coreos/prometheus-operator/blob/master/example/prometheus-operator-crd/servicemonitor.crd.yaml) resource will be deployed by the Kogito Operator to expose the Kogito Service to Prometheus to scrape:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    team: kogito
+    app: onboarding-service
   name: onboarding-service
-  namespace: openshift-monitoring
+  namespace: kogito
 spec:
   endpoints:
   - path: /metrics
-    port: http
+    targetPort: 8080
+    scheme: http
   namespaceSelector:
     matchNames:
-    # the namespace where the service is deployed
     - kogito
   selector:
     matchLabels:

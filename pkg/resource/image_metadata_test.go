@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	v12 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"reflect"
 	"testing"
 )
@@ -230,6 +231,80 @@ func TestExtractProtoBufFilesFromDockerImage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ExtractProtoBufFilesFromDockerImage(tt.args.prefixKey, tt.args.dockerImage); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ExtractProtoBufFilesFromDockerImage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetImagePrometheusAnnotations(t *testing.T) {
+	port := intstr.FromInt(8080)
+
+	type args struct {
+		dockerImage *dockerv10.DockerImage
+	}
+	tests := []struct {
+		name       string
+		args       args
+		wantScrape bool
+		wantScheme string
+		wantPath   string
+		wantPort   *intstr.IntOrString
+		wantErr    bool
+	}{
+		{
+			"WithImageAnnotation",
+			args{
+				&dockerv10.DockerImage{
+					Config: &dockerv10.DockerConfig{
+						Labels: map[string]string{
+							"prometheus.io/scrape": "true",
+							"prometheus.io/path":   "/ms",
+							"prometheus.io/port":   "8080",
+							"prometheus.io/scheme": "https",
+						},
+					},
+				},
+			},
+			true,
+			"https",
+			"/ms",
+			&port,
+			false,
+		},
+		{
+			"WithoutImageAnnotation",
+			args{
+				&dockerv10.DockerImage{
+					Config: &dockerv10.DockerConfig{
+						Labels: map[string]string{},
+					},
+				},
+			},
+			false,
+			"",
+			"",
+			nil,
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotScrape, gotScheme, gotPath, gotPort, err := GetImagePrometheusAnnotations(tt.args.dockerImage)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetImagePrometheusAnnotations() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotScrape != tt.wantScrape {
+				t.Errorf("GetImagePrometheusAnnotations() gotScrape = %v, want %v", gotScrape, tt.wantScrape)
+			}
+			if gotScheme != tt.wantScheme {
+				t.Errorf("GetImagePrometheusAnnotations() gotScheme = %v, want %v", gotScheme, tt.wantScheme)
+			}
+			if gotPath != tt.wantPath {
+				t.Errorf("GetImagePrometheusAnnotations() gotPath = %v, want %v", gotPath, tt.wantPath)
+			}
+			if !reflect.DeepEqual(gotPort, tt.wantPort) {
+				t.Errorf("GetImagePrometheusAnnotations() gotPort = %v, want %v", gotPort, tt.wantPort)
 			}
 		})
 	}

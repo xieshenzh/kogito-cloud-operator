@@ -13,7 +13,7 @@ github.com/Azure/go-autorest/autorest/date
 github.com/PuerkitoBio/purell
 # github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578
 github.com/PuerkitoBio/urlesc
-# github.com/RHsyseng/operator-utils v0.0.0-20191018185525-f2071e612234
+# github.com/RHsyseng/operator-utils v0.0.0-20191024171429-aada4a416142
 github.com/RHsyseng/operator-utils/pkg/resource
 github.com/RHsyseng/operator-utils/pkg/resource/compare
 github.com/RHsyseng/operator-utils/pkg/resource/write
@@ -31,11 +31,14 @@ github.com/census-instrumentation/opencensus-proto/gen-go/agent/trace/v1
 github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1
 github.com/census-instrumentation/opencensus-proto/gen-go/resource/v1
 github.com/census-instrumentation/opencensus-proto/gen-go/trace/v1
-# github.com/coreos/prometheus-operator v0.29.0 => github.com/coreos/prometheus-operator v0.31.1
+# github.com/coreos/prometheus-operator v0.33.0 => github.com/coreos/prometheus-operator v0.31.1
 github.com/coreos/prometheus-operator/pkg/apis/monitoring/v1
 github.com/coreos/prometheus-operator/pkg/client/versioned/typed/monitoring/v1
 github.com/coreos/prometheus-operator/pkg/apis/monitoring
 github.com/coreos/prometheus-operator/pkg/client/versioned/scheme
+github.com/coreos/prometheus-operator/pkg/client/versioned/fake
+github.com/coreos/prometheus-operator/pkg/client/versioned
+github.com/coreos/prometheus-operator/pkg/client/versioned/typed/monitoring/v1/fake
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
 # github.com/dgrijalva/jwt-go v3.2.0+incompatible
@@ -582,10 +585,10 @@ sigs.k8s.io/controller-runtime/pkg/scheme
 sigs.k8s.io/controller-runtime/pkg/client
 sigs.k8s.io/controller-runtime/pkg/cache
 sigs.k8s.io/controller-runtime/pkg/controller
-sigs.k8s.io/controller-runtime/pkg/controller/controllerutil
 sigs.k8s.io/controller-runtime/pkg/handler
 sigs.k8s.io/controller-runtime/pkg/reconcile
 sigs.k8s.io/controller-runtime/pkg/source
+sigs.k8s.io/controller-runtime/pkg/controller/controllerutil
 sigs.k8s.io/controller-runtime/pkg/log
 sigs.k8s.io/controller-runtime/pkg/log/zap
 sigs.k8s.io/controller-runtime/pkg/runtime/scheme

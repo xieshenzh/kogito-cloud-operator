@@ -18,8 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
+	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	cachev1 "sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -32,6 +35,7 @@ import (
 	"github.com/kiegroup/kogito-cloud-operator/pkg/client/openshift"
 	kogitores "github.com/kiegroup/kogito-cloud-operator/pkg/controller/kogitoapp/resource"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/controller/kogitoapp/shared"
+	"github.com/kiegroup/kogito-cloud-operator/pkg/controller/kogitoapp/status"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/test"
 
 	corev1 "k8s.io/api/core/v1"
@@ -89,8 +93,7 @@ func TestNewContainerWithResource(t *testing.T) {
 	assert.Equal(t, container.Resources.Requests.Cpu(), &resource.Quantity{Format: resource.DecimalSI})
 }
 
-func TestKogitoAppWithResource(t *testing.T) {
-
+func createFakeKogitoApp() *v1alpha1.KogitoApp {
 	gitURL := "https://github.com/kiegroup/kogito-examples/"
 	kogitoapp := &cr
 	kogitoapp.Spec.Build = &v1alpha1.KogitoAppBuildObject{
@@ -105,16 +108,34 @@ func TestKogitoAppWithResource(t *testing.T) {
 			ContextDir: "jbpm-quarkus-example",
 		},
 	}
-	dockerImageRaw, err := json.Marshal(&dockerv10.DockerImage{
+
+	return kogitoapp
+}
+
+func createFakeImages(kogitoAppName string) []runtime.Object {
+	dockerImageRaw, _ := json.Marshal(&dockerv10.DockerImage{
 		Config: &dockerv10.DockerConfig{
 			Labels: map[string]string{
 				openshift.ImageLabelForExposeServices: "8080:http",
 			},
 		},
 	})
+
 	isTag := imgv1.ImageStreamTag{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s:latest", kogitoapp.Name),
+			Name:      fmt.Sprintf("%s:latest", kogitoAppName),
+			Namespace: "test",
+		},
+		Image: imgv1.Image{
+			DockerImageMetadata: runtime.RawExtension{
+				Raw: dockerImageRaw,
+			},
+		},
+	}
+
+	isTagBuild := imgv1.ImageStreamTag{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s:latest", kogitoAppName+"-build"),
 			Namespace: "test",
 		},
 		Image: imgv1.Image{
@@ -191,21 +212,26 @@ func TestKogitoAppWithResource(t *testing.T) {
 		},
 	}
 
-	images := []runtime.Object{&isTag, &image1, &image2, &image3, &image4, &image5, &image6}
-	objs := []runtime.Object{kogitoapp}
+	return []runtime.Object{&isTag, &isTagBuild, &image1, &image2, &image3, &image4, &image5, &image6}
+}
+
+func setupSchema(kogitoapp *v1alpha1.KogitoApp) *runtime.Scheme {
 	// add to schemas to avoid: "failed to add object to fake client"
-	// Create a fake client to mock API calls.
 	s := meta.GetRegisteredSchema()
-	s.AddKnownTypes(v1alpha1.SchemeGroupVersion,
-		kogitoapp,
-		&v1alpha1.KogitoAppList{})
-	s.AddKnownTypes(appsv1.GroupVersion,
-		&appsv1.DeploymentConfig{},
-		&appsv1.DeploymentConfigList{})
+	s.AddKnownTypes(v1alpha1.SchemeGroupVersion, kogitoapp, &v1alpha1.KogitoAppList{})
+	s.AddKnownTypes(appsv1.GroupVersion, &appsv1.DeploymentConfig{}, &appsv1.DeploymentConfigList{})
 	s.AddKnownTypes(buildv1.GroupVersion, &buildv1.BuildConfig{}, &buildv1.BuildConfigList{})
 	s.AddKnownTypes(routev1.GroupVersion, &routev1.Route{}, &routev1.RouteList{})
 	s.AddKnownTypes(imgv1.GroupVersion, &imgv1.ImageStreamTag{}, &imgv1.ImageStream{}, &imgv1.ImageStreamList{})
 	s.AddKnownTypes(monv1.SchemeGroupVersion, &monv1.ServiceMonitor{}, &monv1.ServiceMonitorList{})
+	return s
+}
+
+func TestKogitoAppWithResource(t *testing.T) {
+	kogitoapp := createFakeKogitoApp()
+	images := createFakeImages(kogitoapp.Name)
+	objs := []runtime.Object{kogitoapp}
+	s := setupSchema(kogitoapp)
 	// Create a fake client to mock API calls.
 	cli := fake.NewFakeClient(objs...)
 	// OpenShift Image Client Fake
@@ -217,13 +243,13 @@ func TestKogitoAppWithResource(t *testing.T) {
 	disccli := test.CreateFakeDiscoveryClient()
 	// ********** sanity check
 	kogitoAppList := &v1alpha1.KogitoAppList{}
-	err = cli.List(context.TODO(), kogitoAppList, client.InNamespace("test"))
+	err := cli.List(context.TODO(), kogitoAppList, client.InNamespace("test"))
 	if err != nil {
 		t.Fatalf("Failed to list kogitoapp (%v)", err)
 	}
 	assert.True(t, len(kogitoAppList.Items) > 0)
 	assert.True(t, kogitoAppList.Items[0].Spec.Resources.Limits[0].Resource == cpuResource)
-	cache := &cachev1.FakeInformers{}
+	cachefake := &cachev1.FakeInformers{}
 	// call reconcile object and mock image and build clients
 	r := &ReconcileKogitoApp{
 		client: &kogitoclient.Client{
@@ -234,7 +260,7 @@ func TestKogitoAppWithResource(t *testing.T) {
 			Discovery:     disccli,
 		},
 		scheme: s,
-		cache:  cache,
+		cache:  cachefake,
 	}
 	req := reconcile.Request{
 		NamespacedName: types.NamespacedName{
@@ -271,4 +297,239 @@ func TestKogitoAppWithResource(t *testing.T) {
 		assert.NotNil(t, hasIs)
 	}
 
+}
+
+func TestReconcileKogitoApp_updateKogitoAppStatus(t *testing.T) {
+	kogitoapp := createFakeKogitoApp()
+	kogitoapp.Status = v1alpha1.KogitoAppStatus{
+		Builds: v1alpha1.Builds{
+			Complete: []string{
+				"test-app",
+				"test-app-build",
+			},
+		},
+		Route: "http://localhost",
+		Conditions: []v1alpha1.Condition{
+			{
+				Type: v1alpha1.DeployedConditionType,
+			},
+		},
+	}
+	images := createFakeImages(kogitoapp.Name)
+	s := setupSchema(kogitoapp)
+	req := reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      kogitoapp.Name,
+			Namespace: kogitoapp.Namespace,
+		},
+	}
+	buildconfigRuntime := &buildv1.BuildConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kogitoapp.Name,
+			Namespace: kogitoapp.Namespace,
+			Labels: map[string]string{
+				kogitores.LabelKeyAppName:   kogitoapp.Name,
+				kogitores.LabelKeyBuildType: string(kogitores.BuildTypeRuntime),
+			},
+		},
+	}
+	buildconfigS2I := &buildv1.BuildConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kogitoapp.Name + "-build",
+			Namespace: kogitoapp.Namespace,
+			Labels: map[string]string{
+				kogitores.LabelKeyAppName:   kogitoapp.Name,
+				kogitores.LabelKeyBuildType: string(kogitores.BuildTypeS2I),
+			},
+		},
+	}
+	buildList := &buildv1.BuildList{
+		Items: []buildv1.Build{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kogitoapp.Name,
+					Namespace: kogitoapp.Namespace,
+					Labels: map[string]string{
+						kogitores.LabelKeyAppName:   kogitoapp.Name,
+						kogitores.LabelKeyBuildType: string(kogitores.BuildTypeRuntime),
+					},
+				},
+				Status: buildv1.BuildStatus{
+					Phase: buildv1.BuildPhaseComplete,
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kogitoapp.Name + "-build",
+					Namespace: kogitoapp.Namespace,
+					Labels: map[string]string{
+						kogitores.LabelKeyAppName:   kogitoapp.Name,
+						kogitores.LabelKeyBuildType: string(kogitores.BuildTypeS2I),
+					},
+				},
+				Status: buildv1.BuildStatus{
+					Phase: buildv1.BuildPhaseComplete,
+				},
+			},
+		},
+	}
+	route := &routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kogitoapp.Name,
+			Namespace: kogitoapp.Namespace,
+		},
+		Spec: routev1.RouteSpec{
+			Host: "localhost",
+		},
+	}
+
+	clientfake := &kogitoclient.Client{
+		ControlCli:    fake.NewFakeClient(kogitoapp, route),
+		BuildCli:      buildfake.NewSimpleClientset(buildconfigRuntime, buildconfigS2I, buildList).BuildV1(),
+		ImageCli:      imgfake.NewSimpleClientset(images...).ImageV1(),
+		Discovery:     test.CreateFakeDiscoveryClient(),
+		PrometheusCli: monfake.NewSimpleClientset().MonitoringV1(),
+	}
+	kogitoAppResources := &kogitores.KogitoAppResources{
+		BuildConfigRuntime: buildconfigRuntime,
+		BuildConfigS2I:     buildconfigS2I,
+		DeploymentConfig: &appsv1.DeploymentConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      kogitoapp.Name,
+				Namespace: kogitoapp.Namespace,
+			},
+		},
+		Route: route,
+	}
+
+	type fields struct {
+		client *kogitoclient.Client
+		scheme *runtime.Scheme
+		cache  cache.Cache
+	}
+	type args struct {
+		request              *reconcile.Request
+		instance             *v1alpha1.KogitoApp
+		kogitoResources      *kogitores.KogitoAppResources
+		updateResourceResult *status.UpdateResourcesResult
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		result *reconcile.Result
+		err    error
+	}{
+		{
+			"Success",
+			fields{
+				clientfake,
+				s,
+				mockCache{
+					kogitoApp: kogitoapp,
+				},
+			},
+			args{
+				&req,
+				kogitoapp,
+				kogitoAppResources,
+				&status.UpdateResourcesResult{},
+			},
+			&reconcile.Result{},
+			nil,
+		},
+		{
+			"Error",
+			fields{
+				clientfake,
+				s,
+				&cachev1.FakeInformers{},
+			},
+			args{
+				&req,
+				kogitoapp,
+				kogitoAppResources,
+				&status.UpdateResourcesResult{
+					Err: fmt.Errorf("error"),
+				},
+			},
+			&reconcile.Result{},
+			fmt.Errorf("error"),
+		},
+		{
+			"Requeue",
+			fields{
+				clientfake,
+				s,
+				&cachev1.FakeInformers{},
+			},
+			args{
+				&req,
+				kogitoapp,
+				kogitoAppResources,
+				&status.UpdateResourcesResult{},
+			},
+			&reconcile.Result{Requeue: true},
+			nil,
+		},
+		{
+			"RequeueAfter",
+			fields{
+				&kogitoclient.Client{
+					ControlCli:    fake.NewFakeClient(kogitoapp),
+					BuildCli:      buildfake.NewSimpleClientset(buildconfigRuntime, buildconfigS2I, buildList).BuildV1(),
+					ImageCli:      imgfake.NewSimpleClientset(images...).ImageV1(),
+					Discovery:     test.CreateFakeDiscoveryClient(),
+					PrometheusCli: monfake.NewSimpleClientset().MonitoringV1(),
+				},
+				s,
+				mockCache{
+					kogitoApp: kogitoapp,
+				},
+			},
+			args{
+				&req,
+				kogitoapp,
+				kogitoAppResources,
+				&status.UpdateResourcesResult{},
+			},
+			&reconcile.Result{RequeueAfter: time.Duration(500) * time.Millisecond},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &ReconcileKogitoApp{
+				client: tt.fields.client,
+				scheme: tt.fields.scheme,
+				cache:  tt.fields.cache,
+			}
+
+			result := &reconcile.Result{}
+			var err error
+
+			r.updateKogitoAppStatus(tt.args.request, tt.args.instance, tt.args.kogitoResources, tt.args.updateResourceResult, result, &err)
+
+			if !reflect.DeepEqual(err, tt.err) {
+				t.Errorf("updateKogitoAppStatus() error = %v, expectErr %v", err, tt.err)
+				return
+			}
+			if !reflect.DeepEqual(result, tt.result) {
+				t.Errorf("updateKogitoAppStatus() result = %v, expectResult %v", result, tt.result)
+				return
+			}
+		})
+	}
+}
+
+type mockCache struct {
+	cache.Cache
+	kogitoApp *v1alpha1.KogitoApp
+}
+
+func (c mockCache) Get(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
+	app := obj.(*v1alpha1.KogitoApp)
+	app.Spec = c.kogitoApp.Spec
+	app.Status = c.kogitoApp.Status
+	return nil
 }

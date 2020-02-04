@@ -172,3 +172,80 @@ func (k *KafkaMeta) AreKafkaPropertiesBlank() bool {
 		len(k.KafkaProperties.Instance) == 0 &&
 		!k.KafkaProperties.UseKogitoInfra
 }
+
+// KeycloakConnectionProperties has the data needed to connect to a Keycloak cluster
+type KeycloakConnectionProperties struct {
+	// +optional
+	// Keycloak
+	Keycloak string `json:"keycloak,omitempty"`
+
+	// +optional
+	// KeycloakRealm
+	KeycloakRealm string `json:"keycloakRealm,omitempty"`
+
+	// +optional
+	// AuthServerURL
+	AuthServerURL string `json:"authServerUrl,omitempty"`
+
+	// +optional
+	// RealmName
+	RealmName string `json:"realmName,omitempty"`
+
+	// +optional
+	// Labels
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// +optional
+	// UseKogitoInfra flags if the instance will use a provided infrastructure by KogitoInfra CR.
+	// Setting this to true will deploy a new KogitoInfra CR into the namespace that will install Keycloak via Keycloak Operator.
+	// Keycloak Operator MUST be installed in the namespace for this to work. On OpenShift, OLM should install it for you.
+	// If running on Kubernetes without OLM installed, please install Keycloak Operator first.
+	// Set this to false and fill all other properties to provide your own infrastructure
+	UseKogitoInfra bool `json:"useKogitoInfra,omitempty"`
+}
+
+// KeycloakMeta defines a structure for specs that need KeycloakProperties integration
+type KeycloakMeta struct {
+	// +optional
+	// KeycloakProperties has the data used by the service to connect to the Keycloak cluster.
+	KeycloakProperties KeycloakConnectionProperties `json:"keycloak,omitempty"`
+
+	// +optional
+	// EnableSecurity
+	EnableSecurity bool `json:"enableSecurity,omitempty"`
+}
+
+// KeycloakAware defines a spec with KeycloakProperties awareness
+type KeycloakAware interface {
+	// GetKeycloakProperties ...
+	GetKeycloakProperties() *KeycloakConnectionProperties
+	// SetKeycloakProperties ...
+	SetKeycloakProperties(props KeycloakConnectionProperties)
+	// AreKeycloakPropertiesBlank checks if the connection properties have been set
+	AreKeycloakPropertiesBlank() bool
+	// EnableKeycloak TODO
+	EnableKeycloak() bool
+}
+
+// GetKeycloakProperties ...
+func (k *KeycloakMeta) GetKeycloakProperties() *KeycloakConnectionProperties {
+	return &k.KeycloakProperties
+}
+
+// SetKeycloakProperties ...
+func (k *KeycloakMeta) SetKeycloakProperties(props KeycloakConnectionProperties) {
+	k.KeycloakProperties = props
+}
+
+// AreKeycloakPropertiesBlank checks if the connection properties have been set
+func (k *KeycloakMeta) AreKeycloakPropertiesBlank() bool {
+	return (len(k.KeycloakProperties.AuthServerURL) == 0 ||
+		len(k.KeycloakProperties.RealmName) == 0 ||
+		len(k.KeycloakProperties.Labels) == 0) &&
+		!k.KeycloakProperties.UseKogitoInfra
+}
+
+// EnableKeycloak checks if Keycloak should be enabled
+func (k *KeycloakMeta) EnableKeycloak() bool {
+	return k.EnableSecurity
+}

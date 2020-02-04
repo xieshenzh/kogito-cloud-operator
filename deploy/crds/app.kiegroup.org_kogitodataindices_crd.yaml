@@ -29,6 +29,9 @@ spec:
         spec:
           description: KogitoDataIndexSpec defines the desired state of KogitoDataIndex
           properties:
+            enableSecurity:
+              description: EnableSecurity
+              type: boolean
             envs:
               description: Environment variables to be added to the runtime container.
                 Keys must be a C_IDENTIFIER.
@@ -220,6 +223,38 @@ spec:
                     without OLM installed, please install Strimzi Operator first.
                     Set this to false and fill other properties to provide your own
                     infrastructure
+                  type: boolean
+              type: object
+            keycloak:
+              description: KeycloakProperties has the data used by the service to
+                connect to the Keycloak cluster.
+              properties:
+                authServerUrl:
+                  description: AuthServerURL
+                  type: string
+                keycloak:
+                  description: Keycloak
+                  type: string
+                keycloakRealm:
+                  description: KeycloakRealm
+                  type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  description: Labels
+                  type: object
+                realmName:
+                  description: RealmName
+                  type: string
+                useKogitoInfra:
+                  description: UseKogitoInfra flags if the instance will use a provided
+                    infrastructure by KogitoInfra CR. Setting this to true will deploy
+                    a new KogitoInfra CR into the namespace that will install Keycloak
+                    via Keycloak Operator. Keycloak Operator MUST be installed in
+                    the namespace for this to work. On OpenShift, OLM should install
+                    it for you. If running on Kubernetes without OLM installed, please
+                    install Keycloak Operator first. Set this to false and fill all
+                    other properties to provide your own infrastructure
                   type: boolean
               type: object
             replicas:

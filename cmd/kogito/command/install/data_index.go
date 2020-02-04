@@ -46,6 +46,7 @@ type installDataIndexFlags struct {
 	infinispanSasl     string
 	infinispanUser     string
 	infinispanPassword string
+	enableSecurity     bool
 }
 
 type installDataIndexCommand struct {
@@ -120,6 +121,9 @@ For more information on Kogito Data Index Service see: https://github.com/kiegro
 				i.flags.kafka.UseKogitoInfra = true
 				log.Info("No Kafka information has been given. A Kafka instance will be automatically deployed via Strimzi Operator in the namespace. Kafka Topics will be created accordingly if they don't exist already")
 			}
+			if i.flags.enableSecurity {
+				log.Info("Security feature is enabled. Keycloak resources will be automatically deployed via Keycloak Operator in the namespace.")
+			}
 			if err := deploy.CheckDeployArgs(&i.flags.CommonFlags); err != nil {
 				return err
 			}
@@ -149,6 +153,7 @@ func (i *installDataIndexCommand) InitHook() {
 	i.command.Flags().StringVar(&i.flags.infinispanSasl, "infinispan-sasl", "", "The Infinispan Server SASL Mechanism, example: PLAIN")
 	i.command.Flags().StringVar(&i.flags.infinispanUser, "infinispan-user", "", "The Infinispan Server username")
 	i.command.Flags().StringVar(&i.flags.infinispanPassword, "infinispan-password", "", "The Infinispan Server password")
+	i.command.Flags().BoolVar(&i.flags.enableSecurity, "enable-security", false, "Enable the security feature of the Data Index Service.")
 }
 
 func (i *installDataIndexCommand) Exec(cmd *cobra.Command, args []string) error {
@@ -175,6 +180,12 @@ func (i *installDataIndexCommand) Exec(cmd *cobra.Command, args []string) error 
 	if i.flags.kafka.UseKogitoInfra {
 		if available := infrastructure.IsStrimziAvailable(i.Client); !available {
 			return fmt.Errorf("Strimzi Operator is not available in the Project: %s. Please make sure to install it before deploying Data Index without Kafka provided ", i.flags.Project)
+		}
+	}
+
+	if i.flags.enableSecurity {
+		if available := infrastructure.IsKeycloakAvailable(i.Client); !available {
+			return fmt.Errorf("Keycloak Operator is not available in the Project: %s. Please make sure to install it before deploying Data Index with security enabled ", i.flags.Project)
 		}
 	}
 
@@ -223,6 +234,7 @@ func (i *installDataIndexCommand) Exec(cmd *cobra.Command, args []string) error 
 			HTTPPort:       i.flags.httpPort,
 			InfinispanMeta: v1alpha1.InfinispanMeta{InfinispanProperties: i.flags.infinispan},
 			KafkaMeta:      v1alpha1.KafkaMeta{KafkaProperties: i.flags.kafka},
+			KeycloakMeta:   v1alpha1.KeycloakMeta{EnableSecurity: i.flags.enableSecurity},
 		},
 		Status: v1alpha1.KogitoDataIndexStatus{
 			KogitoServiceStatus: v1alpha1.KogitoServiceStatus{

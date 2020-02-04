@@ -26,6 +26,7 @@ const KogitoDataIndexCRDName = "kogitodataindices.app.kiegroup.org"
 type KogitoDataIndexSpec struct {
 	InfinispanMeta    `json:",inline"`
 	KafkaMeta         `json:",inline"`
+	KeycloakMeta      `json:",inline"`
 	KogitoServiceSpec `json:",inline"`
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
 

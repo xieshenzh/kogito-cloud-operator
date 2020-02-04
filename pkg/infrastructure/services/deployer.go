@@ -48,12 +48,18 @@ type ServiceDefinition struct {
 	RequiresPersistence bool
 	// RequiresMessaging forces the deployer to deploy a Kafka instance if none is provided
 	RequiresMessaging bool
+	// RequiresSecurity forces the deployer to deploy a Keycloak instance if none is provided
+	RequiresSecurity bool
 	// KafkaTopics is a collection of Kafka Topics to be created within the service
 	KafkaTopics []KafkaTopicDefinition
 	// infinispanAware whether or not to handle Infinispan integration in this service (inject variables, deploy if needed, and so on)
 	infinispanAware bool
 	// kafkaAware whether or not to handle Kafka integration in this service (inject variables, deploy if needed, and so on)
 	kafkaAware bool
+	// keycloakAware whether or not to handle keycloak integration in this service (inject variables, deploy if needed, and so on)
+	keycloakAware bool
+	// KeycloakClientUser is a collection of Keycloak Client and User information to be used to create the Keycloak resources
+	KeycloakClientUser *KeycloakClientUserDefinition
 }
 
 // KafkaTopicDefinition ...
@@ -66,6 +72,26 @@ type KafkaTopicDefinition struct {
 
 // KafkaTopicMessagingType ...
 type KafkaTopicMessagingType string
+
+// KeycloakClientUserDefinition ...
+type KeycloakClientUserDefinition struct {
+	// KeycloakClientName name of the KeycloakClient resource
+	KeycloakClientName string
+	// KeycloakUserName name of the KeycloakUser resource
+	KeycloakUserName string
+	// UserName username of the Keycloak user
+	UserName string
+	// Password password of the Keycloak user
+	Password string
+	// UserRole role of the Keycloak user
+	UserRole string
+	// ClientID ID of the Keycloak client
+	ClientID string
+	// Secret secret of the Keycloak client
+	Secret string
+	// ClientAuthenticatorType authenticator type of the Keycloak client
+	ClientAuthenticatorType string
+}
 
 const (
 	// KafkaTopicIncoming ...
@@ -123,6 +149,10 @@ func (s *serviceDeployer) Deploy() (reconcileAfter time.Duration, err error) {
 		log.Debugf("Kogito Service %s depends on Kafka", service.GetName())
 		s.definition.kafkaAware = true
 	}
+	if keycloakAware, isKeycloak := service.GetSpec().(v1alpha1.KeycloakAware); isKeycloak && keycloakAware.EnableKeycloak() {
+		log.Debugf("Kogito Service %s depends on Keycloak", service.GetName())
+		s.definition.keycloakAware = true
+	}
 
 	// deploy Infinispan
 	if s.definition.infinispanAware {
@@ -137,6 +167,16 @@ func (s *serviceDeployer) Deploy() (reconcileAfter time.Duration, err error) {
 	// deploy Kafka
 	if s.definition.kafkaAware {
 		reconcileAfter, err = s.deployKafka(service)
+		if err != nil {
+			return
+		} else if reconcileAfter > 0 {
+			return
+		}
+	}
+
+	// deploy Keycloak
+	if s.definition.keycloakAware {
+		reconcileAfter, err = s.deployKeycloak(service)
 		if err != nil {
 			return
 		} else if reconcileAfter > 0 {
@@ -261,6 +301,43 @@ func (s *serviceDeployer) deployKafka(instance v1alpha1.KogitoService) (requeueA
 	needUpdate := false
 	if needUpdate, requeueAfter, err =
 		infrastructure.DeployKafkaWithKogitoInfra(kafkaAware, instance.GetNamespace(), s.client); err != nil {
+		return
+	} else if needUpdate {
+		if err = s.update(instance); err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (s *serviceDeployer) deployKeycloak(instance v1alpha1.KogitoService) (requeueAfter time.Duration, err error) {
+	requeueAfter = 0
+	keycloakAware := instance.GetSpec().(v1alpha1.KeycloakAware)
+	if keycloakAware.GetKeycloakProperties() == nil {
+		if s.definition.RequiresSecurity {
+			keycloakAware.SetKeycloakProperties(v1alpha1.KeycloakConnectionProperties{UseKogitoInfra: true})
+		} else {
+			return
+		}
+	}
+	if s.definition.RequiresSecurity &&
+		!keycloakAware.GetKeycloakProperties().UseKogitoInfra &&
+		(len(keycloakAware.GetKeycloakProperties().AuthServerURL) == 0 ||
+			len(keycloakAware.GetKeycloakProperties().RealmName) == 0 ||
+			len(keycloakAware.GetKeycloakProperties().Labels) == 0) {
+		log.Debugf("Service %s requires security and Keycloak info is empty, deploying Keycloak Infrastructure", instance.GetName())
+		keycloakAware.GetKeycloakProperties().UseKogitoInfra = true
+	} else if !keycloakAware.GetKeycloakProperties().UseKogitoInfra {
+		return
+	}
+	if !infrastructure.IsKeycloakAvailable(s.client) {
+		log.Warnf("Looks like that the service %s requires Keycloak, but there's no Keycloak CRD in the namespace %s. Aborting installation.", instance.GetName(), instance.GetNamespace())
+		return
+	}
+
+	needUpdate := false
+	if needUpdate, requeueAfter, err =
+		infrastructure.DeployKeycloakWithKogitoInfra(keycloakAware, instance.GetNamespace(), s.client); err != nil {
 		return
 	} else if needUpdate {
 		if err = s.update(instance); err != nil {

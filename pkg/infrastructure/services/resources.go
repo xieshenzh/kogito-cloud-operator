@@ -18,6 +18,7 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/resource"
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
+	keycloakv1alpha1 "github.com/keycloak/keycloak-operator/pkg/apis/keycloak/v1alpha1"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/apis/app/v1alpha1"
 	kafkabetav1 "github.com/kiegroup/kogito-cloud-operator/pkg/apis/kafka/v1beta1"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/client/kubernetes"
@@ -63,6 +64,20 @@ func (s *serviceDeployer) createRequiredResources(instance v1alpha1.KogitoServic
 		}
 		if s.definition.kafkaAware {
 			if err = s.applyKafkaConfigurations(deployment, instance); err != nil {
+				return resources, err
+			}
+		}
+
+		if s.definition.keycloakAware {
+			if instance.GetSpec().(v1alpha1.KeycloakAware).GetKeycloakProperties().UseKogitoInfra &&
+				infrastructure.IsKeycloakAvailable(s.client) {
+				keycloakClient := s.createKeycloakClient(instance)
+				keycloakUser := s.createKeycloakUser(instance)
+				resources[reflect.TypeOf(keycloakv1alpha1.KeycloakClient{})] = []resource.KubernetesResource{keycloakClient}
+				resources[reflect.TypeOf(keycloakv1alpha1.KeycloakUser{})] = []resource.KubernetesResource{keycloakUser}
+			}
+
+			if err = s.applyKeycloakConfigurations(deployment, instance); err != nil {
 				return resources, err
 			}
 		}
@@ -144,6 +159,31 @@ func (s *serviceDeployer) applyKafkaConfigurations(deployment *appsv1.Deployment
 	return nil
 }
 
+func (s *serviceDeployer) applyKeycloakConfigurations(deployment *appsv1.Deployment, instance v1alpha1.KogitoService) error {
+	keycloakAware := instance.GetSpec().(v1alpha1.KeycloakAware)
+	if keycloakAware.GetKeycloakProperties().UseKogitoInfra && infrastructure.IsKeycloakAvailable(s.client) {
+		setKeycloakVariables(keycloakAware.GetKeycloakProperties(), s.definition.KeycloakClientUser, &deployment.Spec.Template.Spec.Containers[0])
+		setKeycloakCertificateVolume(&deployment.Spec.Template.Spec, 0)
+	}
+	return nil
+}
+
+func (s *serviceDeployer) createKeycloakClient(instance v1alpha1.KogitoService) (keycloakClient resource.KubernetesResource) {
+	if !infrastructure.IsKeycloakAvailable(s.client) {
+		return
+	}
+	keycloakClient = newKeycloakClient(s.getNamespace(), instance.GetSpec().(v1alpha1.KeycloakAware).GetKeycloakProperties().Labels, s.definition.KeycloakClientUser)
+	return
+}
+
+func (s *serviceDeployer) createKeycloakUser(instance v1alpha1.KogitoService) (keycloakUser resource.KubernetesResource) {
+	if !infrastructure.IsKeycloakAvailable(s.client) {
+		return
+	}
+	keycloakUser = newKeycloakUser(s.getNamespace(), instance.GetSpec().(v1alpha1.KeycloakAware).GetKeycloakProperties().Labels, s.definition.KeycloakClientUser)
+	return
+}
+
 // getDeployedResources gets the deployed resources in the cluster owned by the given instance
 func (s *serviceDeployer) getDeployedResources(instance v1alpha1.KogitoService) (resources map[reflect.Type][]resource.KubernetesResource, err error) {
 	reader := read.New(s.client.ControlCli).WithNamespace(instance.GetNamespace()).WithOwnerObject(instance)
@@ -156,6 +196,9 @@ func (s *serviceDeployer) getDeployedResources(instance v1alpha1.KogitoService) 
 
 	if infrastructure.IsStrimziAvailable(s.client) {
 		objectTypes = append(objectTypes, &kafkabetav1.KafkaTopicList{})
+	}
+	if infrastructure.IsKeycloakAvailable(s.client) {
+		objectTypes = append(objectTypes, &keycloakv1alpha1.KeycloakClientList{}, &keycloakv1alpha1.KeycloakUserList{})
 	}
 	return reader.ListAll(objectTypes...)
 }

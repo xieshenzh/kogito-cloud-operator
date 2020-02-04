@@ -15,6 +15,9 @@
 package kogitodataindex
 
 import (
+	"path"
+	"strconv"
+
 	"github.com/kiegroup/kogito-cloud-operator/pkg/apis/app/v1alpha1"
 	appv1alpha1 "github.com/kiegroup/kogito-cloud-operator/pkg/apis/app/v1alpha1"
 	kafkabetav1 "github.com/kiegroup/kogito-cloud-operator/pkg/apis/kafka/v1beta1"
@@ -23,16 +26,17 @@ import (
 	"github.com/kiegroup/kogito-cloud-operator/pkg/infrastructure"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/infrastructure/services"
 	"github.com/kiegroup/kogito-cloud-operator/pkg/logger"
+
 	imgv1 "github.com/openshift/api/image/v1"
 	routev1 "github.com/openshift/api/route/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"path"
-	"strconv"
+
+	keycloakv1alpha1 "github.com/keycloak/keycloak-operator/pkg/apis/keycloak/v1alpha1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -89,6 +93,8 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		&routev1.Route{},
 		&kafkabetav1.KafkaTopic{},
 		&imgv1.ImageStream{},
+		&keycloakv1alpha1.KeycloakUser{},
+		&keycloakv1alpha1.KeycloakClient{},
 	}
 	ownerHandler := &handler.EnqueueRequestForOwner{
 		IsController: true,
@@ -97,7 +103,8 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	for _, watchObject := range watchOwnedObjects {
 		err = c.Watch(&source.Kind{Type: watchObject}, ownerHandler)
 		if err != nil {
-			if framework.IsNoKindMatchError(kafkabetav1.SchemeGroupVersion.Group, err) {
+			if framework.IsNoKindMatchError(kafkabetav1.SchemeGroupVersion.Group, err) ||
+				framework.IsNoKindMatchError(keycloakv1alpha1.SchemeGroupVersion.Group, err) {
 				log.Warn("Tried to watch Kafka CRD, but failed. Maybe related Operators are not installed?")
 				continue
 			}
@@ -138,6 +145,7 @@ func (r *ReconcileKogitoDataIndex) Reconcile(request reconcile.Request) (result 
 		Request:             request,
 		OnDeploymentCreate:  r.onDeploymentCreate,
 		KafkaTopics:         kafkaTopics,
+		KeycloakClientUser:  keycloakClientUser,
 		RequiresPersistence: true,
 		RequiresMessaging:   true,
 	}
@@ -171,6 +179,30 @@ var kafkaTopics = []services.KafkaTopicDefinition{
 	{TopicName: kafkaTopicNameProcessDomain, MessagingType: services.KafkaTopicIncoming},
 	{TopicName: kafkaTopicNameUserTaskDomain, MessagingType: services.KafkaTopicIncoming},
 	{TopicName: kafkaTopicNameJobsEvents, MessagingType: services.KafkaTopicIncoming},
+}
+
+const (
+	keycloakClientName = "data-index-client"
+	keycloakUserName   = "data-index-user"
+
+	userName = "data-index-user"
+	password = "password"
+	userRole = "confidential"
+
+	clientID                = "data-index-client"
+	secret                  = "secret"
+	clientAuthenticatorType = "client-secret"
+)
+
+var keycloakClientUser = &services.KeycloakClientUserDefinition{
+	KeycloakClientName:      keycloakClientName,
+	KeycloakUserName:        keycloakUserName,
+	UserName:                userName,
+	Password:                password,
+	UserRole:                userRole,
+	ClientID:                clientID,
+	Secret:                  secret,
+	ClientAuthenticatorType: clientAuthenticatorType,
 }
 
 func (r *ReconcileKogitoDataIndex) onDeploymentCreate(deployment *appsv1.Deployment, kogitoService appv1alpha1.KogitoService) error {
@@ -217,7 +249,7 @@ func (r *ReconcileKogitoDataIndex) mountProtoBufConfigMaps(deployment *appsv1.De
 		}
 	}
 
-	if len(deployment.Spec.Template.Spec.Volumes) > 0 {
+	if len(cms.Items) > 0 {
 		framework.SetEnvVar(protoBufKeyWatch, "true", &deployment.Spec.Template.Spec.Containers[0])
 		framework.SetEnvVar(protoBufKeyFolder, defaultProtobufMountPath, &deployment.Spec.Template.Spec.Containers[0])
 	} else {
